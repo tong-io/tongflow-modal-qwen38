@@ -27,7 +27,50 @@ from tongflow.models.video_describe import VideoDescribeInput, VideoDescribeOutp
 from tongflow.models.video_gen_text import VideoGenTextInput, VideoGenTextOutput
 from tongflow.node_slots import NodeSlots
 from tongflow.protocol import prompt_media_to_bytes
-from tongflow.slots import node_slot
+from tongflow.slots import current_params, node_slot
+
+
+def _adv(name: str, default):
+    """Advanced-section override (``TONGFLOW_SLOT_PARAMS``) or the plugin default."""
+    v = current_params().get(name)
+    if v is None:
+        return default
+    if isinstance(default, bool):
+        return bool(v)
+    if isinstance(default, int):
+        return int(v)
+    if isinstance(default, float):
+        return float(v)
+    return v
+
+# Per-run knobs offered under the node's collapsed "Advanced" section.
+# Pure literal (the platform scanner reads it by AST, never imports this
+# module). Values reach the handlers via current_params(); an untouched
+# control is absent there and falls back to the plugin default.
+TONGFLOW_SLOT_PARAMS = {
+    "gen-text": {
+        "thinking": {"type": "boolean", "default": False, "label": "Thinking"},
+        "reasoning_effort": {"type": "select", "options": ["low", "medium", "high"], "default": "low", "label": "Reasoning effort", "description": "Applies when thinking is on."},
+    },
+    "combine-text": {
+        "thinking": {"type": "boolean", "default": False, "label": "Thinking"},
+        "reasoning_effort": {"type": "select", "options": ["low", "medium", "high"], "default": "low", "label": "Reasoning effort", "description": "Applies when thinking is on."},
+    },
+    "image-describe": {
+        "thinking": {"type": "boolean", "default": False, "label": "Thinking"},
+        "reasoning_effort": {"type": "select", "options": ["low", "medium", "high"], "default": "low", "label": "Reasoning effort", "description": "Applies when thinking is on."},
+    },
+    "video-describe": {
+        "thinking": {"type": "boolean", "default": False, "label": "Thinking"},
+        "reasoning_effort": {"type": "select", "options": ["low", "medium", "high"], "default": "low", "label": "Reasoning effort", "description": "Applies when thinking is on."},
+    },
+    "image-gen-text": {
+        "reasoning_effort": {"type": "select", "options": ["low", "medium", "high"], "default": "low", "label": "Reasoning effort", "description": "Applies when thinking is on."},
+    },
+    "video-gen-text": {
+        "reasoning_effort": {"type": "select", "options": ["low", "medium", "high"], "default": "low", "label": "Reasoning effort", "description": "Applies when thinking is on."},
+    },
+}
 
 # ── plugin-internal knobs (not ABI fields) ───────────────────────────────────
 
@@ -52,7 +95,7 @@ image = (
     modal.Image.from_registry("pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel")
     .apt_install("ffmpeg")
     .pip_install(
-        "tongflow==0.2.21", "fastapi[standard]",
+        "tongflow==0.3.3", "fastapi[standard]",
         "transformers==5.15.0",
         "accelerate==1.13.0",
         "torchvision",
@@ -102,7 +145,7 @@ class Inference:
     ) -> dict:
         template_kwargs: dict[str, Any] = {"enable_thinking": enable_thinking}
         if enable_thinking:
-            template_kwargs["reasoning_effort"] = REASONING_EFFORT
+            template_kwargs["reasoning_effort"] = _adv("reasoning_effort", REASONING_EFFORT)
         inputs = self.processor.apply_chat_template(
             messages,
             tokenize=True,
@@ -232,7 +275,7 @@ class Inference:
             f"{input.userPrompt or ''}\n\nUser input: {input.text}\n\n"
             "Note: output only the requested answer. Do not include any other content."
         )
-        out = self._generate_multimodal(prompt=user_message)
+        out = self._generate_multimodal(prompt=user_message, enable_thinking=_adv("thinking", False))
         return GenTextOutput(success=True, text=str(out.get("text", "")))
 
     @modal.method()
@@ -243,7 +286,7 @@ class Inference:
             f"{input.userPrompt or ''}\n\nUser input: {joined}\n\n"
             "Note: output only the requested answer. Do not include any other content."
         )
-        out = self._generate_multimodal(prompt=user_message)
+        out = self._generate_multimodal(prompt=user_message, enable_thinking=_adv("thinking", False))
         return CombineTextOutput(success=True, text=str(out.get("text", "")))
 
     @modal.method()
@@ -255,7 +298,9 @@ class Inference:
             or DESCRIBE_IMAGE_FALLBACK
         )
         out = self._generate_multimodal(
-            prompt=instruction, images=[prompt_media_to_bytes(input.image)]
+            prompt=instruction,
+            images=[prompt_media_to_bytes(input.image)],
+            enable_thinking=_adv("thinking", False),
         )
         return ImageDescribeOutput(success=True, text=str(out.get("text", "")))
 
@@ -268,7 +313,9 @@ class Inference:
             or DESCRIBE_VIDEO_FALLBACK
         )
         out = self._generate_multimodal(
-            prompt=instruction, video=prompt_media_to_bytes(input.video)
+            prompt=instruction,
+            video=prompt_media_to_bytes(input.video),
+            enable_thinking=_adv("thinking", False),
         )
         return VideoDescribeOutput(success=True, text=str(out.get("text", "")))
 
